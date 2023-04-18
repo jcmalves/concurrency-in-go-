@@ -10,7 +10,7 @@ import (
 
 const NumberOfPizzas = 10
 
-var pizzasMade, PizzasFailed, total int
+var pizzasMade, pizzasFailed, total int
 
 type Producer struct {
 	data chan PizzaOrder
@@ -40,7 +40,7 @@ func makePizza(pizzaNumber int) *PizzaOrder {
 		success := false
 
 		if rnd < 5 {
-			PizzasFailed++
+			pizzasFailed++
 		} else {
 			pizzasMade++
 		}
@@ -134,4 +134,20 @@ func main() {
 	}
 
 	// print out the ending message
+	color.Cyan("-----------------")
+	color.Cyan("Done for the day.")
+
+	color.Cyan("We made %d pizzas, but failed to make %d, with %d attempts in total", pizzasMade, pizzasFailed, total)
+	switch {
+	case pizzasFailed > 9:
+		color.Red("It was an awful day...")
+	case pizzasFailed >= 6:
+		color.Red("It was not a very good day...")
+	case pizzasFailed >= 4:
+		color.Yellow("It was an okay day...")
+	case pizzasFailed >= 2:
+		color.Yellow("It was a pretty good day...")
+	default:
+		color.Green("It was a great day!")
+	}
 }
