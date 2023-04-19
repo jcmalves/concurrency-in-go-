@@ -2,152 +2,108 @@ package main
 
 import (
 	"fmt"
-	"math/rand"
+	"sync"
 	"time"
-
-	"github.com/fatih/color"
 )
 
-const NumberOfPizzas = 10
-
-var pizzasMade, pizzasFailed, total int
-
-type Producer struct {
-	data chan PizzaOrder
-	quit chan chan error
+// Philosopher is a struct which stores information about a philosopher
+type Philosopher struct {
+	name      string
+	rightFork int
+	leftFork  int
 }
 
-type PizzaOrder struct {
-	pizzaNumber int
-	message     string
-	success     bool
+// philosophers is list of all philosophers
+var philosophers = []Philosopher{
+	{name: "Platão", leftFork: 4, rightFork: 0},
+	{name: "Socrates", leftFork: 0, rightFork: 1},
+	{name: "Aristotle", leftFork: 1, rightFork: 2},
+	{name: "Pascal", leftFork: 2, rightFork: 3},
+	{name: "Locke", leftFork: 3, rightFork: 4},
 }
 
-func (p *Producer) Close() error {
-	ch := make(chan error)
-	p.quit <- ch
-	return <-ch
-}
-
-func makePizza(pizzaNumber int) *PizzaOrder {
-	pizzaNumber++
-	if pizzaNumber <= NumberOfPizzas {
-		delay := rand.Intn(5) + 1
-		fmt.Printf("Received order #%d!\n", pizzaNumber)
-
-		rnd := rand.Intn(12) + 1
-		msg := ""
-		success := false
-
-		if rnd < 5 {
-			pizzasFailed++
-		} else {
-			pizzasMade++
-		}
-		total++
-
-		fmt.Printf("Making pizza #%d. It wil take %d seconds....\n", pizzaNumber, delay)
-		// delay for a bit
-		time.Sleep(time.Duration(delay) * time.Second)
-
-		if rnd <= 2 {
-			msg = fmt.Sprintf("*** We ran out of ingredients for pizza #%d!", pizzaNumber)
-		} else if rnd <= 4 {
-			msg = fmt.Sprintf("*** The cook quit while making pizza #%d!", pizzaNumber)
-		} else {
-			success = true
-			msg = fmt.Sprintf("*** Pizza order #%d is ready!", pizzaNumber)
-		}
-
-		p := PizzaOrder{
-			pizzaNumber: pizzaNumber,
-			message:     msg,
-			success:     success,
-		}
-
-		return &p
-	}
-
-	return &PizzaOrder{
-		pizzaNumber: pizzaNumber,
-	}
-}
-
-func pizzeria(pizzaMaker *Producer) {
-	// keep track if which pizza we are making
-	var i int
-
-	// run forever or until we receive a quit notification
-	// try to make pizzas
-	for {
-		currentPizza := makePizza(i)
-		if currentPizza != nil {
-			i = currentPizza.pizzaNumber
-			select {
-			// we try to make a pizza (we sent something to the data channel)
-			case pizzaMaker.data <- *currentPizza:
-
-			case quitChan := <-pizzaMaker.quit:
-				// close channel
-				close(pizzaMaker.data)
-				close(quitChan)
-				return
-			}
-		}
-	}
-}
+// define some variables
+var hunger = 3 //how many times does a person eat?
+var eatTime = 1 * time.Second
+var thinkTime = 3 * time.Second
+var sleepTime = 1 * time.Second
 
 func main() {
-	// seed the random number generator
-	rand.Seed(time.Now().UnixNano())
+	// print out a welcome message
+	fmt.Println("Dining Philosophers Problem")
+	fmt.Println("---------------------------")
+	fmt.Println("The table is empty.")
 
-	// print out a message
-	color.Cyan("The Pizzeria is open for business!")
-	color.Cyan("----------------------------------")
+	// start the meal
+	dine()
 
-	// create a producer
-	pizzaJob := &Producer{
-		data: make(chan PizzaOrder),
-		quit: make(chan chan error),
+	// print out finished message
+	fmt.Println("The table is empty.")
+
+}
+
+func dine() {
+	eatTime = 0 * time.Second
+	sleepTime = 0 * time.Second
+	thinkTime = 0 * time.Second
+
+	wg := &sync.WaitGroup{}
+	wg.Add(len(philosophers))
+
+	seated := &sync.WaitGroup{}
+	seated.Add(len(philosophers))
+
+	// forks is a map of all 5 forks.
+	var forks = make(map[int]*sync.Mutex)
+	for i := 0; i < len(philosophers); i++ {
+		forks[i] = &sync.Mutex{}
 	}
 
-	// run the producer in the background
-	go pizzeria(pizzaJob)
+	// start the meal
+	for i := 0; i < len(philosophers); i++ {
+		// fire off a goroutine for the current philosopher
+		go diningProblem(philosophers[i], wg, forks, seated)
+	}
 
-	// create and run consumer
-	for i := range pizzaJob.data {
-		if i.pizzaNumber <= NumberOfPizzas {
-			if i.success {
-				color.Green(i.message)
-				color.Green("Order #%d is out for delivery!", i.pizzaNumber)
-			} else {
-				color.Red(i.message)
-				color.Red("The customer is really mad!")
-			}
+	wg.Wait()
+}
+
+func diningProblem(philosopher Philosopher, wg *sync.WaitGroup, forks map[int]*sync.Mutex, seated *sync.WaitGroup) {
+	defer wg.Done()
+
+	// seat the philosopher at the table
+	fmt.Printf("%s is seated at the table.\n", philosopher.name)
+	seated.Done()
+
+	seated.Wait()
+
+	// eat three times
+	for i := hunger; i > 0; i-- {
+		// get a lock on both forks
+		if philosopher.leftFork > philosopher.rightFork {
+			forks[philosopher.rightFork].Lock()
+			fmt.Printf("\t%s takes the right fork.\n", philosopher.name)
+			forks[philosopher.leftFork].Lock()
+			fmt.Printf("\t%s takes the left fork.\n", philosopher.name)
 		} else {
-			color.Cyan("Done making pizzas...")
-			err := pizzaJob.Close()
-			if err != nil {
-				color.Red("*** Error closing channel!", err)
-			}
+			forks[philosopher.leftFork].Lock()
+			fmt.Printf("\t%s takes the left fork.\n", philosopher.name)
+			forks[philosopher.rightFork].Lock()
+			fmt.Printf("\t%s takes the right fork.\n", philosopher.name)
 		}
+
+		fmt.Printf("\t%s has both forks and is eating.\n", philosopher.name)
+		time.Sleep(eatTime)
+
+		fmt.Printf("\t%s is thinking.\n", philosopher.name)
+		time.Sleep(thinkTime)
+
+		forks[philosopher.leftFork].Unlock()
+		forks[philosopher.rightFork].Unlock()
+
+		fmt.Printf("\t%s put down the forks.\n", philosopher.name)
 	}
 
-	// print out the ending message
-	color.Cyan("-----------------")
-	color.Cyan("Done for the day.")
-
-	color.Cyan("We made %d pizzas, but failed to make %d, with %d attempts in total", pizzasMade, pizzasFailed, total)
-	switch {
-	case pizzasFailed > 9:
-		color.Red("It was an awful day...")
-	case pizzasFailed >= 6:
-		color.Red("It was not a very good day...")
-	case pizzasFailed >= 4:
-		color.Yellow("It was an okay day...")
-	case pizzasFailed >= 2:
-		color.Yellow("It was a pretty good day...")
-	default:
-		color.Green("It was a great day!")
-	}
+	fmt.Println(philosopher.name, "is satisfied.")
+	fmt.Println(philosopher.name, "left the table.")
 }
